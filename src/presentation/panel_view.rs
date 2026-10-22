@@ -17,6 +17,7 @@ use iced::{
 pub enum Message {
     Tick,
     ToggleExpand,
+    CollapsePanel,
     Gesture(GestureInput),
     SelectScreen(String),
     ToggleSize,
@@ -88,6 +89,15 @@ pub fn view_notch<'a>(
             .width(Length::Fill),
             origin
         ),
+        button("⚙")
+            .on_press(Message::Assistant(
+                assistant_runtime::Message::ToggleSettings
+            ))
+            .style(if runtime.view == assistant_runtime::View::Settings {
+                button::secondary
+            } else {
+                button::text
+            }),
         button(if controller.panel.enlarged {
             "↙"
         } else {

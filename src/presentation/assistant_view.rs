@@ -7,11 +7,7 @@ use iced::{
 
 pub fn view(runtime: &Runtime) -> Element<'_, Message> {
     let mut tabs = row![].spacing(4);
-    for (label, view) in [
-        ("Conversation", View::Conversation),
-        ("Activity", View::Activity),
-        ("Settings", View::Settings),
-    ] {
+    for (label, view) in [("Activity", View::Activity), ("Chat", View::Conversation)] {
         let selected = view == runtime.view;
         tabs = tabs.push(
             button(text(label).size(12))
@@ -46,9 +42,23 @@ pub fn view(runtime: &Runtime) -> Element<'_, Message> {
             let available = runtime.assistant.can_change_context()
                 && !runtime.connecting
                 && !runtime.dialog_open;
+            let folder_display = if runtime.settings.folder.as_os_str().is_empty() {
+                "(No folder selected)".into()
+            } else {
+                runtime.settings.folder.to_string_lossy().into_owned()
+            };
             let settings = column![
+                row![
+                    button("← Back")
+                        .padding([3, 8])
+                        .style(button::text)
+                        .on_press(Message::ToggleSettings),
+                    text("Settings & Engine").size(13),
+                ]
+                .spacing(8)
+                .align_y(alignment::Vertical::Center),
                 text("Working folder").size(12),
-                text(runtime.settings.folder.to_string_lossy().into_owned()).size(12).color(COLOR_TEXT_MUTED),
+                text(folder_display).size(12).color(COLOR_TEXT_MUTED),
                 button("Choose folder…").on_press_maybe(available.then_some(Message::ChooseFolder)),
                 text("OpenCode executable").size(12),
                 text(runtime.settings.executable.clone()).size(12).color(COLOR_TEXT_MUTED),
@@ -184,19 +194,24 @@ pub fn view(runtime: &Runtime) -> Element<'_, Message> {
             if runtime.view == View::Conversation {
                 for message in &runtime.assistant.snapshot.messages {
                     if !message.text.is_empty() {
-                        content = content.push(
-                            column![
-                                text(if message.role == "user" {
-                                    "You"
-                                } else {
-                                    "minibro"
-                                })
-                                .size(11)
-                                .color(COLOR_TEXT_MUTED),
-                                text(message.text.clone()).size(13)
-                            ]
-                            .spacing(4),
-                        );
+                        let is_user = message.role == "user";
+                        let sender = text(if is_user { "You" } else { "minibro" })
+                            .size(11)
+                            .color(COLOR_TEXT_MUTED);
+                        let md: Element<'_, Message> =
+                            if let Some(items) = runtime.markdown_cache.get(&message.id) {
+                                iced::widget::markdown::view(
+                                    items.as_slice(),
+                                    iced::widget::markdown::Settings::with_text_size(
+                                        13,
+                                        iced::widget::markdown::Style::from(&iced::Theme::Dark),
+                                    ),
+                                )
+                                .map(|_| Message::Noop)
+                            } else {
+                                text(&message.text).size(13).into()
+                            };
+                        content = content.push(column![sender, md].spacing(4));
                     }
                 }
             } else {

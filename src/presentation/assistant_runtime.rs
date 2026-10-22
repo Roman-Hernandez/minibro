@@ -24,14 +24,24 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum View {
     #[default]
-    Conversation,
     Activity,
+    Conversation,
     Settings,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_view_is_activity_and_settings_toggles() {
+        let mut runtime = Runtime::default();
+        assert_eq!(runtime.view, View::Activity);
+        let _task = runtime.update(Message::ToggleSettings);
+        assert_eq!(runtime.view, View::Settings);
+        let _task = runtime.update(Message::ToggleSettings);
+        assert_eq!(runtime.view, View::Activity);
+    }
     #[test]
     fn quitting_without_an_engine_enters_shutdown() {
         let mut runtime = Runtime::default();
@@ -85,6 +95,8 @@ pub enum Message {
     ChooseExecutable,
     ExecutableChosen(Option<PathBuf>),
     View(View),
+    ToggleSettings,
+    Noop,
     Permission(String, bool),
     Choice(String, usize, String),
     CustomAnswer(String, usize, String),
@@ -104,8 +116,10 @@ pub struct Runtime {
     pub editor: text_editor::Content,
     pub settings: Settings,
     pub view: View,
+    pub previous_view: View,
     pub answers: BTreeMap<(String, usize), AnswerDraft>,
     pub expanded_activity: BTreeSet<String>,
+    pub markdown_cache: BTreeMap<String, Vec<iced::widget::markdown::Item>>,
     pub connecting: bool,
     pub dialog_open: bool,
     pub follow_conversation: bool,
@@ -135,9 +149,11 @@ impl Default for Runtime {
                 executable: std::env::var("MINIBRO_OPENCODE_BIN").unwrap_or("opencode".into()),
                 session: None,
             }),
-            view: View::Conversation,
+            view: View::Activity,
+            previous_view: View::Activity,
             answers: BTreeMap::new(),
             expanded_activity: BTreeSet::new(),
+            markdown_cache: BTreeMap::new(),
             connecting: false,
             dialog_open: false,
             follow_conversation: true,
@@ -339,6 +355,7 @@ impl Runtime {
                 }
                 self.connection = None;
                 self.settings.session = None;
+                self.markdown_cache.clear();
                 self.assistant = Assistant::default();
                 self.assistant.draft = self.editor.text();
                 return self.update(Message::Connect);
@@ -387,7 +404,21 @@ impl Runtime {
                     return self.persist();
                 }
             }
-            Message::View(view) => self.view = view,
+            Message::View(view) => {
+                if self.view != View::Settings {
+                    self.previous_view = self.view;
+                }
+                self.view = view;
+            }
+            Message::ToggleSettings => {
+                if self.view == View::Settings {
+                    self.view = self.previous_view;
+                } else {
+                    self.previous_view = self.view;
+                    self.view = View::Settings;
+                }
+            }
+            Message::Noop => {}
             Message::Scrolled(follow) => self.follow_conversation = follow,
             Message::Permission(id, allow) => {
                 let command = self.assistant.permission(&id, allow);
@@ -486,6 +517,24 @@ impl Runtime {
                         self.connecting = false;
                     }
                     self.assistant.apply(event);
+                    if snapshot {
+                        let active_ids = self
+                            .assistant
+                            .snapshot
+                            .messages
+                            .iter()
+                            .map(|m| &m.id)
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
+                        self.markdown_cache.retain(|id, _| active_ids.contains(id));
+                        for message in &self.assistant.snapshot.messages {
+                            self.markdown_cache
+                                .entry(message.id.clone())
+                                .or_insert_with(|| {
+                                    iced::widget::markdown::parse(&message.text).collect()
+                                });
+                        }
+                    }
                     let new_input = self
                         .assistant
                         .snapshot

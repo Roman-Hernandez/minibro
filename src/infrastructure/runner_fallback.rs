@@ -120,6 +120,15 @@ impl FallbackApp {
                 self.clock.reset();
                 self.apply_placement(true)
             }
+            AppMessage::Presentation(Message::CollapsePanel) => {
+                if self.controller.panel.is_expanded && !self.assistant.dialog_open {
+                    self.controller.panel.collapse();
+                    self.clock.reset();
+                    self.apply_placement(true)
+                } else {
+                    Task::none()
+                }
+            }
             AppMessage::Presentation(Message::Gesture(input)) => {
                 match self.controller.pointer(input) {
                     GestureAction::Click => {
@@ -198,7 +207,7 @@ impl FallbackApp {
             AppMessage::Presentation(Message::ReviewNotice) => {
                 self.controller.panel.expand();
                 self.assistant.assistant.notice = None;
-                self.assistant.view = crate::presentation::assistant_runtime::View::Conversation;
+                self.assistant.view = crate::presentation::assistant_runtime::View::Activity;
                 self.controller.set_mood(self.assistant.assistant.mood());
                 self.clock.reset();
                 self.apply_placement(true)
@@ -255,6 +264,7 @@ impl FallbackApp {
                     Message::Assistant(crate::presentation::assistant_runtime::Message::Quit),
                 )),
                 window::Event::Moved(position) => Some(AppMessage::WindowMoved(position)),
+                window::Event::Unfocused => Some(AppMessage::Presentation(Message::CollapsePanel)),
                 window::Event::Resized(_) | window::Event::Rescaled(_) | window::Event::Focused => {
                     Some(AppMessage::RefreshScreens)
                 }

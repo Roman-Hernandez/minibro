@@ -13,7 +13,7 @@ use crate::presentation::{
 };
 use iced::{
     Color, Element, Length, Subscription, Task, Theme, theme,
-    widget::{Space, container, row},
+    widget::{Space, button, container, row},
     window::Id,
 };
 use iced_exwlshell::reexport::{
@@ -121,13 +121,14 @@ impl WaylandApp {
         };
         let (width, height) = self.size();
         let left = self.controller.placement.left(screen, width).round() as i32;
+        let screen_width = screen.width.round() as i32;
         let expanded = self.controller.panel.is_expanded;
         let notice = self.assistant.assistant.notice.is_some();
         let region = Task::done(WaylandMessage::SetInputRegion {
             id,
             callback: iced_exwlshell::actions::RegionActionCB::new(move |region| {
                 let result = if expanded {
-                    region.add(left, 0, width as i32, height as i32)
+                    region.add(0, 0, screen_width, height as i32)
                 } else {
                     let notch_width = width.min(NOTCH_COLLAPSED_WIDTH);
                     region
@@ -313,6 +314,15 @@ impl WaylandApp {
                 self.clock.reset();
                 self.apply_placement(true)
             }
+            WaylandMessage::Presentation(Message::CollapsePanel) => {
+                if self.controller.panel.is_expanded && !self.assistant.dialog_open {
+                    self.controller.panel.collapse();
+                    self.clock.reset();
+                    self.apply_placement(true)
+                } else {
+                    Task::none()
+                }
+            }
             WaylandMessage::Presentation(Message::Gesture(input)) => {
                 match self.controller.pointer(input) {
                     GestureAction::Click => {
@@ -389,7 +399,7 @@ impl WaylandApp {
             WaylandMessage::Presentation(Message::ReviewNotice) => {
                 self.controller.panel.expand();
                 self.assistant.assistant.notice = None;
-                self.assistant.view = crate::presentation::assistant_runtime::View::Conversation;
+                self.assistant.view = crate::presentation::assistant_runtime::View::Activity;
                 self.controller.set_mood(self.assistant.assistant.mood());
                 self.clock.reset();
                 self.apply_placement(true)
@@ -424,20 +434,41 @@ impl WaylandApp {
             .placement
             .left(screen, self.size().0)
             .round();
-        container(row![
-            Space::new().width(left),
-            panel_view::view_notch(
-                &self.controller,
-                &self.assistant,
-                Some(iced::Point::ORIGIN),
-                self.assistant.dimensions(&self.controller, Some(screen))
-            )
-            .map(WaylandMessage::Presentation)
-        ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_y(iced::alignment::Vertical::Top)
-        .into()
+        let content: Element<'_, WaylandMessage> = if self.controller.panel.is_expanded {
+            row![
+                button(Space::new().width(left.max(0.0)).height(Length::Fill))
+                    .style(button::text)
+                    .on_press(WaylandMessage::Presentation(Message::CollapsePanel)),
+                panel_view::view_notch(
+                    &self.controller,
+                    &self.assistant,
+                    Some(iced::Point::ORIGIN),
+                    self.assistant.dimensions(&self.controller, Some(screen)),
+                )
+                .map(WaylandMessage::Presentation),
+                button(Space::new().width(Length::Fill).height(Length::Fill))
+                    .style(button::text)
+                    .on_press(WaylandMessage::Presentation(Message::CollapsePanel)),
+            ]
+            .into()
+        } else {
+            row![
+                Space::new().width(left),
+                panel_view::view_notch(
+                    &self.controller,
+                    &self.assistant,
+                    Some(iced::Point::ORIGIN),
+                    self.assistant.dimensions(&self.controller, Some(screen)),
+                )
+                .map(WaylandMessage::Presentation),
+            ]
+            .into()
+        };
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_y(iced::alignment::Vertical::Top)
+            .into()
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
@@ -457,6 +488,12 @@ impl WaylandApp {
             self.receiver
                 .listen()
                 .map(|event| WaylandMessage::Shell(Box::new(event))),
+            iced::event::listen_with(|event, _status, _id| match event {
+                iced::Event::Window(iced::window::Event::Unfocused) => {
+                    Some(WaylandMessage::Presentation(Message::CollapsePanel))
+                }
+                _ => None,
+            }),
         ])
     }
 }
@@ -589,5 +626,24 @@ mod tests {
             Some("one")
         );
         assert_eq!(app.controller.placement.screen, "two");
+    }
+
+    #[test]
+    fn collapse_panel_collapses_when_expanded() {
+        let mut app = app();
+        app.controller.toggle_panel();
+        assert!(app.controller.panel.is_expanded);
+        let _ = app.update(WaylandMessage::Presentation(Message::CollapsePanel));
+        assert!(!app.controller.panel.is_expanded);
+    }
+
+    #[test]
+    fn collapse_panel_does_not_collapse_if_dialog_open() {
+        let mut app = app();
+        app.controller.toggle_panel();
+        app.assistant.dialog_open = true;
+        assert!(app.controller.panel.is_expanded);
+        let _ = app.update(WaylandMessage::Presentation(Message::CollapsePanel));
+        assert!(app.controller.panel.is_expanded);
     }
 }

@@ -12,7 +12,7 @@ default = ["wayland"]
 wayland = ["dep:iced_exwlshell"]
 
 [dependencies]
-iced = { version = "0.14", features = ["advanced", "canvas", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "canvas", "tokio", "markdown"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time", "net", "macros", "signal"] }
