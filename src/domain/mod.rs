@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod character;
 pub mod mood;
 pub mod panel;
