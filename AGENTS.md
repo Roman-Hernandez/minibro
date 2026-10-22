@@ -45,7 +45,8 @@ These rules apply to all development agents working in this repository.
 - Schedule animation work only while needed or for a specific deadline.
 - Preserve avatar and panel state across surface and monitor changes.
 - Measure performance claims against a recorded baseline.
-- Linux/Hyprland is the primary runtime target; macOS is the second target.
+- Develop Linux and macOS behavior together. Hyprland is the current primary
+  validation environment; keep shared behavior independent of either platform.
 - Isolate Linux APIs and dependencies with target configuration. Keep the fallback
   build working with `--no-default-features`.
 - Keep shared positioning policy free of platform handles. Distinguish logical

@@ -17,8 +17,10 @@ Presenta una carita geométrica animada que parpadea y reacciona con distintos e
   - `Waiting` (mirada neutra expectante)
   - `Error` (ojos en cruz `x x`)
 - **Panel interactivo colapsable:** Expansión y contracción al hacer clic sobre el notch con tarjeta de tareas simuladas de agentes.
-- **Consumo mínimo de CPU:** Suscripción de frames adaptativa (60 FPS durante parpadeos/animaciones, pausado a ~0% en reposo absoluto).
-- **Arquitectura Hexagonal:** Dominio puro desacoplado del motor gráfico, listo para incorporar adaptadores de macOS (`NSPanel` / `cocoa`).
+- **Posicionamiento:** Notch compacto de 168 × 32 unidades lógicas, arrastre horizontal y selector `Screen` en el panel cuando hay varios monitores. El clic se confirma al soltar; movimientos menores a 6 unidades no inician un arrastre.
+- **Posición persistente:** Guarda monitor y posición horizontal al terminar el arrastre o elegir pantalla. Recupera una pantalla disponible si falta la guardada.
+- **Animación adaptativa:** Actualizaciones de unos 60 FPS durante animaciones; en reposo espera hasta el próximo parpadeo, sin sondeo continuo de monitores.
+- **Arquitectura Hexagonal:** Dominio puro, gestos y geometría compartidos; APIs de plataforma aisladas en infraestructura.
 - **Runner Fallback:** Permite ejecutar como ventana transparente flotante mediante `--windowed` o en entornos sin Wayland Layer Shell.
 
 ---
@@ -47,6 +49,12 @@ cargo run -- --windowed
 ```bash
 cargo run --no-default-features
 ```
+
+Linux Layer Shell y macOS comparten la política de posicionamiento. macOS usa el runner de ventana y AppKit para consultar pantallas y el cursor; su validación nativa sigue pendiente. En el runner convencional de otras plataformas se conserva el arrastre del sistema, sin prometer selección de monitor ni restauración de posición. Las ventanas Wayland convencionales no permiten posicionamiento absoluto desde el cliente.
+
+El arrastre entre monitores no forma parte de este incremento: usar `Screen` para cambiar de pantalla. La posición se guarda en `$XDG_STATE_HOME/minibro/position.json` (por defecto `~/.local/state/minibro/position.json`) en Linux y en `~/Library/Application Support/minibro/position.json` en macOS.
+
+Ver [diseño y validación de posicionamiento](docs/notch-positioning.md) para límites y pruebas de plataforma.
 
 ---
 

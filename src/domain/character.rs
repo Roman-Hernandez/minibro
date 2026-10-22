@@ -88,11 +88,29 @@ impl Character {
     pub fn is_actively_animating(&self) -> bool {
         self.is_blinking || matches!(self.mood, Mood::Thinking | Mood::Working)
     }
+
+    pub fn next_update_in(&self) -> f32 {
+        if self.is_actively_animating() {
+            0.016
+        } else {
+            self.next_blink_in.max(0.001)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_waits_for_blink_deadline_then_animates() {
+        let mut character = Character::new();
+        character.tick(2.0);
+        assert!((character.next_update_in() - 1.5).abs() < 0.001);
+        character.tick(1.5);
+        assert!(character.is_actively_animating());
+        assert!(character.next_update_in() <= 0.016);
+    }
 
     #[test]
     fn test_initial_state() {
