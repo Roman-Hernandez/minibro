@@ -29,6 +29,7 @@ pub enum Command {
 pub enum Event {
     Snapshot(Snapshot),
     Sent,
+    TurnId { request: String, turn: String },
     InputReplied(String),
     Uncertain(String),
     Failed(String),
@@ -37,7 +38,15 @@ pub enum Event {
 }
 
 #[derive(Debug, Clone)]
+pub enum NoticeKind {
+    Attention,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone)]
 pub struct Notice {
+    pub kind: NoticeKind,
     pub text: String,
     pub expires: Option<Instant>,
 }
@@ -54,6 +63,7 @@ pub struct Assistant {
     pub notice: Option<Notice>,
     pub in_flight: BTreeSet<String>,
     pending_turn: Option<String>,
+    submitted_draft: Option<String>,
 }
 
 impl Assistant {
@@ -86,6 +96,7 @@ impl Assistant {
                 .as_nanos()
         );
         self.pending_turn = Some(id.clone());
+        self.submitted_draft = Some(self.draft.clone());
         self.sending = true;
         self.error = None;
         Some(Command::Send {
@@ -165,6 +176,7 @@ impl Assistant {
                     self.sending = false;
                     self.notice = Some(Notice {
                         text: "Task finished — review the result".into(),
+                        kind: NoticeKind::Success,
                         expires: Some(Instant::now() + Duration::from_secs(8)),
                     });
                 }
@@ -179,6 +191,7 @@ impl Assistant {
                 if new_input {
                     self.notice = Some(Notice {
                         text: "Your assistant needs a response".into(),
+                        kind: NoticeKind::Attention,
                         expires: None,
                     });
                 }
@@ -198,6 +211,7 @@ impl Assistant {
                     self.sending = false;
                     self.notice = Some(Notice {
                         text: "The task reported an error".into(),
+                        kind: NoticeKind::Error,
                         expires: Some(Instant::now() + Duration::from_secs(8)),
                     });
                 }
@@ -205,7 +219,14 @@ impl Assistant {
             }
             Event::Sent => {
                 self.sending = false;
-                self.draft.clear();
+                if self.submitted_draft.take().as_ref() == Some(&self.draft) {
+                    self.draft.clear();
+                }
+            }
+            Event::TurnId { request, turn } => {
+                if self.pending_turn.as_ref() == Some(&request) {
+                    self.pending_turn = Some(turn);
+                }
             }
             Event::InputReplied(id) => {
                 self.in_flight.remove(&id);
@@ -234,6 +255,7 @@ impl Assistant {
                 self.error = Some(error);
                 self.notice = Some(Notice {
                     text: "OpenCode disconnected — review connection".into(),
+                    kind: NoticeKind::Error,
                     expires: Some(Instant::now() + Duration::from_secs(8)),
                 });
             }
@@ -249,6 +271,12 @@ impl Assistant {
             Mood::Working
         } else if self.busy() {
             Mood::Thinking
+        } else if self
+            .notice
+            .as_ref()
+            .is_some_and(|n| matches!(n.kind, NoticeKind::Success))
+        {
+            Mood::Success
         } else {
             Mood::Idle
         }
@@ -273,6 +301,30 @@ impl Assistant {
 
 pub use crate::domain::assistant::{Permission, Question, QuestionItem, Snapshot};
 
+pub fn panel_dimensions(
+    expanded: bool,
+    enlarged: bool,
+    notice: bool,
+    available: Option<(f32, f32)>,
+) -> (f32, f32) {
+    let preferred: (f32, f32) = if expanded {
+        if enlarged {
+            (760.0, 720.0)
+        } else {
+            (520.0, 560.0)
+        }
+    } else if notice {
+        (320.0, 124.0)
+    } else {
+        (168.0, 32.0)
+    };
+    let (width, height) = available.unwrap_or((f32::MAX, f32::MAX));
+    (
+        preferred.0.min((width - 16.0).max(1.0)),
+        preferred.1.min((height - 16.0).max(1.0)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +347,16 @@ mod tests {
         assert_eq!(assistant.draft, "create my project");
         assistant.apply(Event::Sent);
         assert!(assistant.draft.is_empty());
+    }
+
+    #[test]
+    fn accepted_prompt_does_not_delete_text_typed_for_the_next_turn() {
+        let mut assistant = ready();
+        assistant.draft = "first request".into();
+        assistant.send();
+        assistant.draft = "next request".into();
+        assistant.apply(Event::Sent);
+        assert_eq!(assistant.draft, "next request");
     }
 
     #[test]
@@ -368,5 +430,47 @@ mod tests {
         assistant.apply(Event::Uncertain("Response interrupted".into()));
         assert!(assistant.send().is_none());
         assert!(!assistant.draft.is_empty());
+    }
+
+    #[test]
+    fn small_screens_and_notices_keep_controls_inside_the_output() {
+        assert_eq!(
+            panel_dimensions(true, true, false, Some((300.0, 240.0))),
+            (284.0, 224.0)
+        );
+        assert_eq!(panel_dimensions(false, false, false, None), (168.0, 32.0));
+        assert_eq!(panel_dimensions(true, false, false, None), (520.0, 560.0));
+        assert_eq!(panel_dimensions(true, true, false, None), (760.0, 720.0));
+        let mut assistant = ready();
+        assistant.notice = Some(Notice {
+            text: "Review".into(),
+            kind: NoticeKind::Attention,
+            expires: None,
+        });
+        assistant.snapshot.permissions.push(Permission {
+            id: "per_one".into(),
+            ..Permission::default()
+        });
+        assistant.notice = None;
+        assert_eq!(assistant.snapshot.permissions.len(), 1);
+    }
+
+    #[test]
+    fn completed_turn_shows_success_only_while_its_notice_is_visible() {
+        let mut assistant = ready();
+        assistant.draft = "hello".into();
+        let Command::Send { message_id, .. } = assistant.send().unwrap() else {
+            panic!()
+        };
+        assistant.apply(Event::Sent);
+        assistant.apply(Event::Snapshot(Snapshot {
+            session: "ses_test".into(),
+            turn_id: message_id,
+            completed: true,
+            ..Snapshot::default()
+        }));
+        assert_eq!(assistant.mood(), Mood::Success);
+        assistant.notice = None;
+        assert_eq!(assistant.mood(), Mood::Idle);
     }
 }

@@ -1,5 +1,22 @@
 use iced::Color;
 
+pub fn app_theme() -> iced::Theme {
+    static THEME: std::sync::LazyLock<iced::Theme> = std::sync::LazyLock::new(|| {
+        iced::Theme::custom(
+            "minibro",
+            iced::theme::Palette {
+                background: COLOR_NOTCH_BG,
+                text: COLOR_TEXT_PRIMARY,
+                primary: Color::from_rgb8(180, 203, 246),
+                success: COLOR_ACCENT_SUCCESS,
+                danger: COLOR_ACCENT_ERROR,
+                warning: COLOR_ACCENT_WAITING,
+            },
+        )
+    });
+    THEME.clone()
+}
+
 pub const NOTCH_COLLAPSED_WIDTH: f32 = 168.0;
 pub const NOTCH_COLLAPSED_HEIGHT: f32 = 32.0;
 

@@ -1,5 +1,5 @@
 use super::positioning::{Gesture, GestureAction, GestureInput, Placement, Screen};
-use crate::domain::{Character, MockAgentTask, Mood, PanelState};
+use crate::domain::{Character, Mood, PanelState};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NotchController {
@@ -68,17 +68,6 @@ impl NotchController {
 
     pub fn tick(&mut self, dt: f32) -> bool {
         self.character.tick(dt)
-    }
-
-    pub fn select_task(&mut self, index: usize) {
-        self.panel.select_task(index);
-    }
-
-    #[must_use]
-    pub fn selected_task(&self) -> Option<&MockAgentTask> {
-        self.panel
-            .selected_task
-            .and_then(|idx| self.panel.tasks.get(idx))
     }
 
     #[must_use]

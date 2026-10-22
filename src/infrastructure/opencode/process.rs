@@ -85,10 +85,10 @@ impl Server {
                         }
                     } else if byte == b'\n' {
                         let text = String::from_utf8_lossy(&line);
-                        if text.starts_with("opencode server listening on ") {
-                            if let Some(sender) = sender.take() {
-                                let _ = sender.send(ready_url(&text, port));
-                            }
+                        if text.starts_with("opencode server listening on ")
+                            && let Some(sender) = sender.take()
+                        {
+                            let _ = sender.send(ready_url(&text, port));
                         }
                         line.clear();
                     } else {

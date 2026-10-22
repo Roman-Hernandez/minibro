@@ -132,3 +132,48 @@ pub fn id(value: &Value) -> Result<String, String> {
     }
     Ok(id.into())
 }
+
+pub fn new_message_id() -> Result<String, String> {
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let time = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "System clock is before epoch")?
+        .as_millis() as u64)
+        << 12;
+    let mut previous = LAST.load(Ordering::SeqCst);
+    let encoded = loop {
+        let next = (time + 1).max(previous + 1);
+        match LAST.compare_exchange_weak(previous, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break next & 0xffffffffffff,
+            Err(current) => previous = current,
+        }
+    };
+    let mut random = [0; 14];
+    getrandom::fill(&mut random).map_err(|_| "OS randomness unavailable")?;
+    let alphabet = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let suffix: String = random
+        .iter()
+        .map(|byte| alphabet[*byte as usize % alphabet.len()] as char)
+        .collect();
+    // OpenCode's message cursor depends on its six-byte ascending timestamp, not just a msg_ prefix.
+    Ok(format!("msg_{encoded:012x}{suffix}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn message_ids_match_the_engine_time_ordered_format() {
+        let first = new_message_id().unwrap();
+        let second = new_message_id().unwrap();
+        assert_eq!(first.len(), 30);
+        assert!(first.starts_with("msg_"));
+        assert!(first[4..16].bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(first[16..].bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert!(first[..16] < second[..16]);
+    }
+}

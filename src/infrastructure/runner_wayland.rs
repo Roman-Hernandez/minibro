@@ -7,10 +7,9 @@ use crate::infrastructure::{
     position_store::PositionStore,
 };
 use crate::presentation::{
+    assistant_runtime::Runtime,
     panel_view::{self, Message},
-    theme::{
-        NOTCH_COLLAPSED_HEIGHT, NOTCH_COLLAPSED_WIDTH, NOTCH_EXPANDED_HEIGHT, NOTCH_EXPANDED_WIDTH,
-    },
+    theme::{NOTCH_COLLAPSED_HEIGHT, NOTCH_COLLAPSED_WIDTH},
 };
 use iced::{
     Color, Element, Length, Subscription, Task, Theme, theme,
@@ -30,6 +29,7 @@ use std::collections::BTreeMap;
 
 pub struct WaylandApp {
     controller: NotchController,
+    assistant: Runtime,
     store: PositionStore,
     clock: AnimationClock,
     receiver: shell::ShellReceiver,
@@ -86,6 +86,7 @@ impl WaylandApp {
         controller.placement = store.restore();
         Self {
             controller,
+            assistant: Runtime::default(),
             store,
             receiver,
             clock: AnimationClock::default(),
@@ -97,11 +98,13 @@ impl WaylandApp {
     }
 
     fn size(&self) -> (f32, f32) {
-        if self.controller.panel.is_expanded {
-            (NOTCH_EXPANDED_WIDTH, NOTCH_EXPANDED_HEIGHT)
-        } else {
-            (NOTCH_COLLAPSED_WIDTH, NOTCH_COLLAPSED_HEIGHT)
-        }
+        let screen = self
+            .controller
+            .screens
+            .iter()
+            .find(|s| Some(&s.id) == self.current_screen.as_ref())
+            .or_else(|| self.controller.placement.resolve(&self.controller.screens));
+        self.assistant.dimensions(&self.controller, screen)
     }
 
     fn apply_placement(&self, resize: bool) -> Task<WaylandMessage> {
@@ -118,10 +121,31 @@ impl WaylandApp {
         };
         let (width, height) = self.size();
         let left = self.controller.placement.left(screen, width).round() as i32;
+        let expanded = self.controller.panel.is_expanded;
+        let notice = self.assistant.assistant.notice.is_some();
         let region = Task::done(WaylandMessage::SetInputRegion {
             id,
             callback: iced_exwlshell::actions::RegionActionCB::new(move |region| {
-                if let Err(error) = region.add(left, 0, width as i32, height as i32) {
+                let result = if expanded {
+                    region.add(left, 0, width as i32, height as i32)
+                } else {
+                    let notch_width = width.min(NOTCH_COLLAPSED_WIDTH);
+                    region
+                        .add(
+                            left + ((width - notch_width) / 2.0) as i32,
+                            0,
+                            notch_width as i32,
+                            32,
+                        )
+                        .and_then(|_| {
+                            if notice {
+                                region.add(left, 40, width as i32, (height - 40.0).max(0.0) as i32)
+                            } else {
+                                Ok(())
+                            }
+                        })
+                };
+                if let Err(error) = result {
                     eprintln!("[minibro] Could not set notch input region: {error:?}");
                 }
             }),
@@ -134,6 +158,14 @@ impl WaylandApp {
                     size: LayerSize::fill_width(height as u32),
                 }),
                 region,
+                Task::done(WaylandMessage::KeyboardInteractivityChange {
+                    id,
+                    keyboard_interactivity: if expanded {
+                        KeyboardInteractivity::OnDemand
+                    } else {
+                        KeyboardInteractivity::None
+                    },
+                }),
             ])
         } else {
             region
@@ -321,19 +353,46 @@ impl WaylandApp {
                         .map(WaylandMessage::Saved),
                 ])
             }
-            WaylandMessage::Presentation(Message::SetMood(mood)) => {
-                self.controller.set_mood(mood);
-                self.clock.reset();
-                Task::none()
+            WaylandMessage::Presentation(Message::Assistant(
+                crate::presentation::assistant_runtime::Message::QuitReady,
+            )) => iced::exit(),
+            WaylandMessage::Presentation(Message::Assistant(message)) => {
+                let previous_size = self.size();
+                let task = self
+                    .assistant
+                    .update(message)
+                    .map(|m| WaylandMessage::Presentation(Message::Assistant(m)));
+                let mood = self.assistant.assistant.mood();
+                if self.controller.character.mood != mood {
+                    self.controller.set_mood(mood);
+                    self.clock.reset();
+                }
+                Task::batch([
+                    task,
+                    if previous_size != self.size() {
+                        self.apply_placement(true)
+                    } else {
+                        Task::none()
+                    },
+                ])
             }
-            WaylandMessage::Presentation(Message::CycleMood) => {
-                self.controller.cycle_mood();
-                self.clock.reset();
-                Task::none()
+            WaylandMessage::Presentation(Message::ToggleSize) => {
+                self.controller.panel.enlarged = !self.controller.panel.enlarged;
+                self.apply_placement(true)
             }
-            WaylandMessage::Presentation(Message::SelectTask(idx)) => {
-                self.controller.select_task(idx);
-                Task::none()
+            WaylandMessage::Presentation(Message::DismissNotice | Message::NoticeExpired) => {
+                self.assistant.assistant.notice = None;
+                self.controller.set_mood(self.assistant.assistant.mood());
+                self.clock.reset();
+                self.apply_placement(true)
+            }
+            WaylandMessage::Presentation(Message::ReviewNotice) => {
+                self.controller.panel.expand();
+                self.assistant.assistant.notice = None;
+                self.assistant.view = crate::presentation::assistant_runtime::View::Conversation;
+                self.controller.set_mood(self.assistant.assistant.mood());
+                self.clock.reset();
+                self.apply_placement(true)
             }
             WaylandMessage::Saved(result) => {
                 if let Err(error) = result {
@@ -367,8 +426,13 @@ impl WaylandApp {
             .round();
         container(row![
             Space::new().width(left),
-            panel_view::view_notch(&self.controller, Some(iced::Point::ORIGIN))
-                .map(WaylandMessage::Presentation)
+            panel_view::view_notch(
+                &self.controller,
+                &self.assistant,
+                Some(iced::Point::ORIGIN),
+                self.assistant.dimensions(&self.controller, Some(screen))
+            )
+            .map(WaylandMessage::Presentation)
         ])
         .width(Length::Fill)
         .height(Length::Fill)
@@ -378,6 +442,12 @@ impl WaylandApp {
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
         Subscription::batch([
+            self.assistant
+                .subscription()
+                .map(|m| WaylandMessage::Presentation(Message::Assistant(m))),
+            self.assistant
+                .notice_subscription()
+                .map(|_| WaylandMessage::Presentation(Message::NoticeExpired)),
             if self.surface.is_some() {
                 animation::ticks(&self.controller)
                     .map(|_| WaylandMessage::Presentation(Message::Tick))
@@ -418,7 +488,7 @@ pub fn run() -> Result<(), iced_exwlshell::Error> {
         text_color: Color::WHITE,
     })
     .subscription(WaylandApp::subscription)
-    .theme(|_: &WaylandApp, _| Some(Theme::Dark))
+    .theme(|_: &WaylandApp, _| Some(crate::presentation::theme::app_theme()))
     .run()
 }
 
@@ -444,6 +514,7 @@ mod tests {
         controller.placement.screen = "one".into();
         WaylandApp {
             controller,
+            assistant: Runtime::default(),
             store: PositionStore::default(),
             clock: AnimationClock::default(),
             receiver,
