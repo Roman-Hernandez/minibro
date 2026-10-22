@@ -1,0 +1,18 @@
+[package]
+name = "minibro"
+version = "0.1.0"
+edition = "2024"
+authors = ["Roman Hernandez"]
+description = "Ultra-lightweight desktop notch assistant"
+license = "MIT"
+repository = "https://github.com/Roman-Hernandez/minibro"
+
+[features]
+default = ["wayland"]
+wayland = ["dep:iced_exwlshell"]
+
+[dependencies]
+iced = { version = "0.14", features = ["canvas", "tokio"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+iced_exwlshell = { version = "0.21.0-rc3", optional = true }
