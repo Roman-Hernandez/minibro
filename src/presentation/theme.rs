@@ -1,7 +1,7 @@
 use iced::Color;
 
-pub const NOTCH_COLLAPSED_WIDTH: f32 = 180.0;
-pub const NOTCH_COLLAPSED_HEIGHT: f32 = 36.0;
+pub const NOTCH_COLLAPSED_WIDTH: f32 = 168.0;
+pub const NOTCH_COLLAPSED_HEIGHT: f32 = 32.0;
 
 pub const NOTCH_EXPANDED_WIDTH: f32 = 380.0;
 pub const NOTCH_EXPANDED_HEIGHT: f32 = 280.0;

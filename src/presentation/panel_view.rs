@@ -1,5 +1,7 @@
 use crate::application::NotchController;
+use crate::application::positioning::GestureInput;
 use crate::domain::Mood;
+use crate::presentation::drag_area::drag_area;
 use crate::presentation::face_canvas::FaceProgram;
 use crate::presentation::theme::{
     COLOR_ACCENT_ERROR, COLOR_ACCENT_IDLE, COLOR_ACCENT_SUCCESS, COLOR_ACCENT_THINKING,
@@ -9,27 +11,37 @@ use crate::presentation::theme::{
 };
 use iced::border::Radius;
 use iced::widget::canvas::Canvas;
-use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
-use iced::{Alignment, Border, Color, Element, Length, Shadow};
+use iced::widget::{
+    Space, button, column, container, mouse_area, pick_list, row, scrollable, text,
+};
+use iced::{Alignment, Border, Color, Element, Length, Point, Shadow};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     Tick,
     ToggleExpand,
+    Gesture(GestureInput),
+    SelectScreen(String),
     SetMood(Mood),
     CycleMood,
     SelectTask(usize),
 }
 
-pub fn view_notch(controller: &NotchController) -> Element<'static, Message> {
+pub fn view_notch(
+    controller: &NotchController,
+    origin: Option<Point>,
+) -> Element<'static, Message> {
     if controller.panel.is_expanded {
-        view_expanded(controller)
+        view_expanded(controller, origin)
     } else {
-        view_collapsed(controller)
+        view_collapsed(controller, origin)
     }
 }
 
-fn view_collapsed(controller: &NotchController) -> Element<'static, Message> {
+fn view_collapsed(
+    controller: &NotchController,
+    origin: Option<Point>,
+) -> Element<'static, Message> {
     let face = Canvas::new(FaceProgram::new(controller.character.clone()))
         .width(Length::Fixed(60.0))
         .height(Length::Fixed(24.0));
@@ -66,10 +78,10 @@ fn view_collapsed(controller: &NotchController) -> Element<'static, Message> {
             ..Default::default()
         });
 
-    mouse_area(notch_box).on_press(Message::ToggleExpand).into()
+    drag_area(notch_box, origin)
 }
 
-fn view_expanded(controller: &NotchController) -> Element<'static, Message> {
+fn view_expanded(controller: &NotchController, origin: Option<Point>) -> Element<'static, Message> {
     let face = Canvas::new(FaceProgram::new(controller.character.clone()))
         .width(Length::Fixed(60.0))
         .height(Length::Fixed(24.0));
@@ -89,7 +101,7 @@ fn view_expanded(controller: &NotchController) -> Element<'static, Message> {
         ..Default::default()
     });
 
-    let header_clickable = mouse_area(
+    let header_clickable = drag_area(
         row![
             face,
             mood_badge,
@@ -99,8 +111,8 @@ fn view_expanded(controller: &NotchController) -> Element<'static, Message> {
         .align_y(Alignment::Center)
         .spacing(8)
         .padding([4, 8]),
-    )
-    .on_press(Message::ToggleExpand);
+        origin,
+    );
 
     // Mood quick-picker
     let mood_buttons = row(Mood::ALL
@@ -189,10 +201,27 @@ fn view_expanded(controller: &NotchController) -> Element<'static, Message> {
 
     let scroll_tasks = scrollable(task_items).height(Length::Fill);
 
+    let selected_screen = controller.placement.resolve(&controller.screens).cloned();
+    let screen_picker: Element<'static, Message> = if controller.screens.len() > 1 {
+        row![
+            text("Screen").size(11).color(COLOR_TEXT_MUTED),
+            pick_list(controller.screens.clone(), selected_screen, |screen| {
+                Message::SelectScreen(screen.id)
+            })
+            .text_size(11),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        Space::new().into()
+    };
+
     let content = column![
         header_clickable,
         Space::new().height(Length::Fixed(4.0)),
         mood_buttons,
+        screen_picker,
         Space::new().height(Length::Fixed(8.0)),
         scroll_tasks,
     ]
