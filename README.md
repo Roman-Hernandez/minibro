@@ -25,7 +25,7 @@ Presenta una carita geométrica animada que parpadea y reacciona con distintos e
 
 ## Requisitos
 
-- **Rust:** Toolchain 1.80+ (edición 2024 recomendada).
+- **Rust:** Toolchain estable actualizado, compatible con la edición 2024. La versión mínima soportada todavía no está validada.
 - **Linux (Wayland):** Hyprland, Sway u otro compositor compatible con `zwlr_layer_shell_v1`.
 - **Librerías del sistema:** `wayland-client`, `libxkbcommon`, `vulkan-loader`.
 
@@ -53,10 +53,15 @@ cargo run --no-default-features
 ## Pruebas y Calidad
 
 ```bash
-cargo test
 cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo build --locked
 ```
+
+Repetir Clippy, tests y build con `--no-default-features` para validar el runner fallback. La CI valida también esta configuración en macOS.
+
+Las reglas de contribución y el flujo de ramas están en [AGENTS.md](AGENTS.md).
 
 ---
 
