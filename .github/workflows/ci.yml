@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -13,6 +20,7 @@ jobs:
   format:
     name: Code Formatting
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -23,6 +31,7 @@ jobs:
   clippy:
     name: Clippy Linter
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,12 +41,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwayland-dev libxkbcommon-dev
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --no-default-features --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
 
   test-linux:
-    name: Test (Linux)
+    name: Test and Build (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,14 +55,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwayland-dev libxkbcommon-dev
-      - run: cargo test --verbose
-      - run: cargo test --no-default-features --verbose
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --no-default-features --all-targets
+      - run: cargo build --locked
+      - run: cargo build --locked --no-default-features
 
   check-macos:
-    name: Check (macOS)
+    name: Lint, Test and Build (macOS)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --no-default-features --verbose
-      - run: cargo test --no-default-features --verbose
+        with:
+          components: clippy
+      - run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - run: cargo test --locked --no-default-features --all-targets
+      - run: cargo build --locked --no-default-features
