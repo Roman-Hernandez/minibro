@@ -25,8 +25,9 @@ Agent questions support choices, multiple selection and custom answers according
 to their schema. Stop asks OpenCode to abort; it cannot undo completed operations
 or guarantee termination of every external process a tool launched.
 
-Conversation and Activity share the same pending-input cards. Settings configures
-folder, executable, connection and a new conversation. Folder/session changes are
+Conversation and Activity share the same pending-input cards. A dedicated floating
+settings window (opened via the ⚙ button in the header) configures folder,
+executable, connection and a new conversation, keeping the notch dropdown clean. Folder/session changes are
 blocked during active work and unresolved input. Only the active minibro-created
 root and its verified descendants are actionable; unrelated terminal sessions are
 excluded. Engine history is not deleted on exit.
