@@ -26,7 +26,6 @@ pub enum View {
     #[default]
     Activity,
     Conversation,
-    Settings,
 }
 
 #[cfg(test)]
@@ -34,13 +33,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_view_is_activity_and_settings_toggles() {
+    fn default_view_is_activity_and_switches_to_conversation() {
         let mut runtime = Runtime::default();
         assert_eq!(runtime.view, View::Activity);
-        let _task = runtime.update(Message::ToggleSettings);
-        assert_eq!(runtime.view, View::Settings);
-        let _task = runtime.update(Message::ToggleSettings);
-        assert_eq!(runtime.view, View::Activity);
+        let _task = runtime.update(Message::View(View::Conversation));
+        assert_eq!(runtime.view, View::Conversation);
     }
     #[test]
     fn quitting_without_an_engine_enters_shutdown() {
@@ -95,6 +92,8 @@ pub enum Message {
     ChooseExecutable,
     ExecutableChosen(Option<PathBuf>),
     View(View),
+    OpenSettings,
+    CloseSettings,
     ToggleSettings,
     Noop,
     Permission(String, bool),
@@ -116,7 +115,6 @@ pub struct Runtime {
     pub editor: text_editor::Content,
     pub settings: Settings,
     pub view: View,
-    pub previous_view: View,
     pub answers: BTreeMap<(String, usize), AnswerDraft>,
     pub expanded_activity: BTreeSet<String>,
     pub markdown_cache: BTreeMap<String, Vec<iced::widget::markdown::Item>>,
@@ -150,7 +148,6 @@ impl Default for Runtime {
                 session: None,
             }),
             view: View::Activity,
-            previous_view: View::Activity,
             answers: BTreeMap::new(),
             expanded_activity: BTreeSet::new(),
             markdown_cache: BTreeMap::new(),
@@ -342,7 +339,6 @@ impl Runtime {
                     self.assistant.error = None;
                 } else {
                     self.assistant.error = Some("Choose an existing working folder first".into());
-                    self.view = View::Settings;
                 }
             }
             Message::NewConversation
@@ -404,21 +400,11 @@ impl Runtime {
                     return self.persist();
                 }
             }
-            Message::View(view) => {
-                if self.view != View::Settings {
-                    self.previous_view = self.view;
-                }
-                self.view = view;
-            }
-            Message::ToggleSettings => {
-                if self.view == View::Settings {
-                    self.view = self.previous_view;
-                } else {
-                    self.previous_view = self.view;
-                    self.view = View::Settings;
-                }
-            }
-            Message::Noop => {}
+            Message::View(view) => self.view = view,
+            Message::OpenSettings
+            | Message::CloseSettings
+            | Message::ToggleSettings
+            | Message::Noop => {}
             Message::Scrolled(follow) => self.follow_conversation = follow,
             Message::Permission(id, allow) => {
                 let command = self.assistant.permission(&id, allow);

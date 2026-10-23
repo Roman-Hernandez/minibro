@@ -16,8 +16,10 @@ use iced::{
     widget::{Space, button, container, row},
     window::Id,
 };
+use iced_exwlshell::actions::IcedXdgWindowSettings;
 use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, LayerSize, Margin, NewLayerShellSettings, OutputOption,
+    PixelSize,
 };
 use iced_exwlshell::{
     daemon,
@@ -37,6 +39,7 @@ pub struct WaylandApp {
     surface: Option<Id>,
     current_screen: Option<String>,
     pending: Option<(Id, String)>,
+    pub settings_window: Option<Id>,
 }
 
 #[to_layer_message(multi)]
@@ -44,6 +47,7 @@ pub struct WaylandApp {
 pub enum WaylandMessage {
     Presentation(Message),
     SurfaceReady(Id),
+    WindowClosed(Id),
     Shell(Box<ShellEvent>),
     Saved(Result<(), String>),
 }
@@ -94,6 +98,7 @@ impl WaylandApp {
             surface: None,
             current_screen: None,
             pending: None,
+            settings_window: None,
         }
     }
 
@@ -323,6 +328,38 @@ impl WaylandApp {
                     Task::none()
                 }
             }
+            WaylandMessage::Presentation(Message::OpenSettings) => {
+                if let Some(id) = self.settings_window.take() {
+                    Task::done(WaylandMessage::RemoveWindow(id))
+                } else {
+                    let id = Id::unique();
+                    self.settings_window = Some(id);
+                    Task::done(WaylandMessage::NewBaseWindow {
+                        settings: IcedXdgWindowSettings {
+                            size: Some(PixelSize {
+                                width: std::num::NonZeroU32::new(480).expect("valid width"),
+                                height: std::num::NonZeroU32::new(440).expect("valid height"),
+                            }),
+                            client_side_decorations: false,
+                            app_id: Some("minibro-settings".into()),
+                        },
+                        id,
+                    })
+                }
+            }
+            WaylandMessage::Presentation(Message::CloseSettings) => {
+                if let Some(id) = self.settings_window.take() {
+                    Task::done(WaylandMessage::RemoveWindow(id))
+                } else {
+                    Task::none()
+                }
+            }
+            WaylandMessage::WindowClosed(id) => {
+                if self.settings_window == Some(id) {
+                    self.settings_window = None;
+                }
+                Task::none()
+            }
             WaylandMessage::Presentation(Message::Gesture(input)) => {
                 match self.controller.pointer(input) {
                     GestureAction::Click => {
@@ -415,6 +452,10 @@ impl WaylandApp {
     }
 
     pub fn view(&self, id: Id) -> Element<'_, WaylandMessage> {
+        if Some(id) == self.settings_window {
+            return panel_view::view_settings_window(&self.assistant)
+                .map(WaylandMessage::Presentation);
+        }
         let target = self
             .pending
             .as_ref()
@@ -444,6 +485,7 @@ impl WaylandApp {
                     &self.assistant,
                     Some(iced::Point::ORIGIN),
                     self.assistant.dimensions(&self.controller, Some(screen)),
+                    self.settings_window.is_some(),
                 )
                 .map(WaylandMessage::Presentation),
                 button(Space::new().width(Length::Fill).height(Length::Fill))
@@ -459,6 +501,7 @@ impl WaylandApp {
                     &self.assistant,
                     Some(iced::Point::ORIGIN),
                     self.assistant.dimensions(&self.controller, Some(screen)),
+                    self.settings_window.is_some(),
                 )
                 .map(WaylandMessage::Presentation),
             ]
@@ -488,7 +531,10 @@ impl WaylandApp {
             self.receiver
                 .listen()
                 .map(|event| WaylandMessage::Shell(Box::new(event))),
-            iced::event::listen_with(|event, _status, _id| match event {
+            iced::event::listen_with(|event, _status, id| match event {
+                iced::Event::Window(iced::window::Event::Closed) => {
+                    Some(WaylandMessage::WindowClosed(id))
+                }
                 iced::Event::Window(iced::window::Event::Unfocused) => {
                     Some(WaylandMessage::Presentation(Message::CollapsePanel))
                 }
@@ -563,6 +609,7 @@ mod tests {
             surface: Some(Id::unique()),
             current_screen: Some("one".into()),
             pending: None,
+            settings_window: None,
         }
     }
 
@@ -645,5 +692,15 @@ mod tests {
         assert!(app.controller.panel.is_expanded);
         let _ = app.update(WaylandMessage::Presentation(Message::CollapsePanel));
         assert!(app.controller.panel.is_expanded);
+    }
+
+    #[test]
+    fn open_and_close_settings_window() {
+        let mut app = app();
+        assert!(app.settings_window.is_none());
+        let _ = app.update(WaylandMessage::Presentation(Message::OpenSettings));
+        assert!(app.settings_window.is_some());
+        let _ = app.update(WaylandMessage::Presentation(Message::CloseSettings));
+        assert!(app.settings_window.is_none());
     }
 }

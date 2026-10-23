@@ -10,7 +10,7 @@ use crate::{
 };
 use iced::{
     Border, Color, Element, Length, Point, alignment,
-    widget::{Space, button, canvas::Canvas, column, container, row, text, tooltip},
+    widget::{Space, button, canvas::Canvas, column, container, row, scrollable, text, tooltip},
 };
 
 #[derive(Debug, Clone)]
@@ -18,6 +18,8 @@ pub enum Message {
     Tick,
     ToggleExpand,
     CollapsePanel,
+    OpenSettings,
+    CloseSettings,
     Gesture(GestureInput),
     SelectScreen(String),
     ToggleSize,
@@ -39,6 +41,7 @@ pub fn view_notch<'a>(
     runtime: &'a Runtime,
     origin: Option<Point>,
     size: (f32, f32),
+    settings_open: bool,
 ) -> Element<'a, Message> {
     let (width, height) = size;
     if !controller.panel.is_expanded {
@@ -90,10 +93,8 @@ pub fn view_notch<'a>(
             origin
         ),
         button("⚙")
-            .on_press(Message::Assistant(
-                assistant_runtime::Message::ToggleSettings
-            ))
-            .style(if runtime.view == assistant_runtime::View::Settings {
+            .on_press(Message::OpenSettings)
+            .style(if settings_open {
                 button::secondary
             } else {
                 button::text
@@ -153,7 +154,11 @@ pub fn view_notch<'a>(
     container(
         column![
             header,
-            assistant_view::view(runtime).map(Message::Assistant),
+            assistant_view::view(runtime).map(|msg| match msg {
+                assistant_runtime::Message::OpenSettings => Message::OpenSettings,
+                assistant_runtime::Message::CloseSettings => Message::CloseSettings,
+                other => Message::Assistant(other),
+            }),
             footer
         ]
         .spacing(4),
@@ -163,6 +168,67 @@ pub fn view_notch<'a>(
     .height(height)
     .style(surface)
     .into()
+}
+
+pub fn view_settings_window<'a>(runtime: &'a Runtime) -> Element<'a, Message> {
+    let available =
+        runtime.assistant.can_change_context() && !runtime.connecting && !runtime.dialog_open;
+    let folder_display = if runtime.settings.folder.as_os_str().is_empty() {
+        "(No folder selected)".into()
+    } else {
+        runtime.settings.folder.to_string_lossy().into_owned()
+    };
+    let content = column![
+        row![
+            text("minibro · Engine & Workspace Settings").size(14),
+            Space::new().width(Length::Fill),
+            button("✕")
+                .style(button::text)
+                .on_press(Message::CloseSettings),
+        ]
+        .align_y(alignment::Vertical::Center),
+        Space::new().height(4),
+        text("Working folder").size(12),
+        text(folder_display).size(12).color(COLOR_TEXT_MUTED),
+        button("Choose folder…").on_press_maybe(
+            available.then_some(Message::Assistant(assistant_runtime::Message::ChooseFolder)),
+        ),
+        Space::new().height(4),
+        text("OpenCode executable").size(12),
+        text(runtime.settings.executable.clone()).size(12).color(COLOR_TEXT_MUTED),
+        button("Choose executable…").on_press_maybe(
+            available.then_some(Message::Assistant(assistant_runtime::Message::ChooseExecutable)),
+        ),
+        Space::new().height(4),
+        text("Uses your OpenCode model, credentials and permission rules. Configure providers in OpenCode first.")
+            .size(11)
+            .color(COLOR_TEXT_MUTED),
+        Space::new().height(8),
+        row![
+            button("Connect / check status").on_press_maybe(
+                (!runtime.connecting && !runtime.dialog_open)
+                    .then_some(Message::Assistant(assistant_runtime::Message::Connect)),
+            ),
+            button("New conversation").on_press_maybe(
+                (available || !runtime.assistant.connected && !runtime.connecting)
+                    .then_some(Message::Assistant(assistant_runtime::Message::NewConversation)),
+            ),
+            Space::new().width(Length::Fill),
+            button("Close")
+                .style(button::secondary)
+                .on_press(Message::CloseSettings),
+        ]
+        .spacing(8)
+        .align_y(alignment::Vertical::Center),
+    ]
+    .spacing(8)
+    .padding(16);
+
+    container(scrollable(content))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(surface)
+        .into()
 }
 
 fn surface(_: &iced::Theme) -> container::Style {
