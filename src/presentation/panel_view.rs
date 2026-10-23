@@ -1,254 +1,245 @@
-use crate::application::NotchController;
-use crate::application::positioning::GestureInput;
-use crate::domain::Mood;
-use crate::presentation::drag_area::drag_area;
-use crate::presentation::face_canvas::FaceProgram;
-use crate::presentation::theme::{
-    COLOR_ACCENT_ERROR, COLOR_ACCENT_IDLE, COLOR_ACCENT_SUCCESS, COLOR_ACCENT_THINKING,
-    COLOR_ACCENT_WAITING, COLOR_ACCENT_WORKING, COLOR_NOTCH_BG, COLOR_NOTCH_BORDER,
-    COLOR_TEXT_MUTED, COLOR_TEXT_PRIMARY, NOTCH_COLLAPSED_HEIGHT, NOTCH_COLLAPSED_WIDTH,
-    NOTCH_CORNER_RADIUS, NOTCH_EXPANDED_HEIGHT, NOTCH_EXPANDED_WIDTH,
+use crate::{
+    application::{NotchController, positioning::GestureInput},
+    presentation::{
+        assistant_runtime::{self, Runtime},
+        assistant_view,
+        drag_area::drag_area,
+        face_canvas::FaceProgram,
+        theme::*,
+    },
 };
-use iced::border::Radius;
-use iced::widget::canvas::Canvas;
-use iced::widget::{
-    Space, button, column, container, mouse_area, pick_list, row, scrollable, text,
+use iced::{
+    Border, Color, Element, Length, Point, alignment,
+    widget::{Space, button, canvas::Canvas, column, container, row, scrollable, text, tooltip},
 };
-use iced::{Alignment, Border, Color, Element, Length, Point, Shadow};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Message {
     Tick,
     ToggleExpand,
+    CollapsePanel,
+    OpenSettings,
+    CloseSettings,
     Gesture(GestureInput),
     SelectScreen(String),
-    SetMood(Mood),
-    CycleMood,
-    SelectTask(usize),
+    ToggleSize,
+    DismissNotice,
+    ReviewNotice,
+    NoticeExpired,
+    Assistant(assistant_runtime::Message),
 }
 
-pub fn view_notch(
-    controller: &NotchController,
+fn face(controller: &NotchController) -> Element<'static, Message> {
+    Canvas::new(FaceProgram::new(controller.character.clone()))
+        .width(60)
+        .height(24)
+        .into()
+}
+
+pub fn view_notch<'a>(
+    controller: &'a NotchController,
+    runtime: &'a Runtime,
     origin: Option<Point>,
-) -> Element<'static, Message> {
-    if controller.panel.is_expanded {
-        view_expanded(controller, origin)
-    } else {
-        view_collapsed(controller, origin)
+    size: (f32, f32),
+    settings_open: bool,
+) -> Element<'a, Message> {
+    let (width, height) = size;
+    if !controller.panel.is_expanded {
+        let notch = drag_area(
+            container(face(controller))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .width(NOTCH_COLLAPSED_WIDTH.min(width))
+                .height(32)
+                .style(surface),
+            origin,
+        );
+        let mut content = column![container(notch).center_x(width)].spacing(8);
+        if let Some(notice) = &runtime.assistant.notice {
+            content = content.push(
+                container(
+                    column![
+                        text(notice.text.clone()).size(12),
+                        row![
+                            button("Review")
+                                .on_press(Message::ReviewNotice)
+                                .padding([3, 8]),
+                            Space::new().width(Length::Fill),
+                            button("Dismiss")
+                                .on_press(Message::DismissNotice)
+                                .padding([3, 8])
+                        ]
+                        .spacing(8),
+                    ]
+                    .spacing(8),
+                )
+                .padding(10)
+                .width(width)
+                .style(surface),
+            );
+        }
+        return content.width(width).height(height).into();
     }
-}
 
-fn view_collapsed(
-    controller: &NotchController,
-    origin: Option<Point>,
-) -> Element<'static, Message> {
-    let face = Canvas::new(FaceProgram::new(controller.character.clone()))
-        .width(Length::Fixed(60.0))
-        .height(Length::Fixed(24.0));
-
-    let content = row![
-        Space::new().width(Length::Fill),
-        face,
-        Space::new().width(Length::Fill),
-    ]
-    .align_y(Alignment::Center)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let notch_box = container(content)
-        .width(Length::Fixed(NOTCH_COLLAPSED_WIDTH))
-        .height(Length::Fixed(NOTCH_COLLAPSED_HEIGHT))
-        .style(|_theme| container::Style {
-            background: Some(COLOR_NOTCH_BG.into()),
-            border: Border {
-                color: COLOR_NOTCH_BORDER,
-                width: 1.0,
-                radius: Radius {
-                    top_left: 0.0,
-                    top_right: 0.0,
-                    bottom_right: NOTCH_CORNER_RADIUS,
-                    bottom_left: NOTCH_CORNER_RADIUS,
-                },
-            },
-            shadow: Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
-            },
-            ..Default::default()
-        });
-
-    drag_area(notch_box, origin)
-}
-
-fn view_expanded(controller: &NotchController, origin: Option<Point>) -> Element<'static, Message> {
-    let face = Canvas::new(FaceProgram::new(controller.character.clone()))
-        .width(Length::Fixed(60.0))
-        .height(Length::Fixed(24.0));
-
-    let mood_badge = container(
-        text(controller.character.mood.label())
-            .size(11)
-            .color(COLOR_TEXT_PRIMARY),
-    )
-    .padding([2, 8])
-    .style(move |_| container::Style {
-        background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.08).into()),
-        border: Border {
-            radius: 8.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-
-    let header_clickable = drag_area(
-        row![
-            face,
-            mood_badge,
-            Space::new().width(Length::Fill),
-            text("▲").size(10).color(COLOR_TEXT_MUTED)
-        ]
-        .align_y(Alignment::Center)
-        .spacing(8)
-        .padding([4, 8]),
-        origin,
-    );
-
-    // Mood quick-picker
-    let mood_buttons = row(Mood::ALL
-        .iter()
-        .map(|mood| {
-            let is_active = *mood == controller.character.mood;
-            let mood_val = *mood;
-            let bg_color = if is_active {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.16)
+    let header = row![
+        drag_area(
+            row![
+                face(controller),
+                text(runtime.assistant.status().to_owned()).size(12)
+            ]
+            .spacing(8)
+            .align_y(alignment::Vertical::Center)
+            .width(Length::Fill),
+            origin
+        ),
+        button("⚙")
+            .on_press(Message::OpenSettings)
+            .style(if settings_open {
+                button::secondary
             } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.04)
-            };
-
-            let accent = match mood_val {
-                Mood::Idle => COLOR_ACCENT_IDLE,
-                Mood::Thinking => COLOR_ACCENT_THINKING,
-                Mood::Working => COLOR_ACCENT_WORKING,
-                Mood::Success => COLOR_ACCENT_SUCCESS,
-                Mood::Waiting => COLOR_ACCENT_WAITING,
-                Mood::Error => COLOR_ACCENT_ERROR,
-            };
-
-            button(text(mood.label()).size(10).color(accent))
-                .padding([2, 6])
-                .on_press(Message::SetMood(mood_val))
-                .style(move |_, _| button::Style {
-                    background: Some(bg_color.into()),
-                    border: Border {
-                        radius: 6.0.into(),
-                        width: if is_active { 1.0 } else { 0.0 },
-                        color: accent,
-                    },
-                    text_color: accent,
-                    ..Default::default()
-                })
-                .into()
-        })
-        .collect::<Vec<_>>())
-    .spacing(4)
-    .align_y(Alignment::Center);
-
-    // Task list items
-    let mut task_items = column![].spacing(6);
-    for (idx, task) in controller.panel.tasks.iter().enumerate() {
-        let is_selected = controller.panel.selected_task == Some(idx);
-        let task_card = mouse_area(
-            container(
-                column![
-                    row![
-                        text(task.agent).size(11).color(COLOR_ACCENT_WAITING),
-                        Space::new().width(Length::Fill),
-                        text(task.status).size(10).color(if task.status == "Done" {
-                            COLOR_ACCENT_SUCCESS
-                        } else {
-                            COLOR_TEXT_MUTED
-                        }),
-                    ],
-                    text(task.summary).size(12).color(COLOR_TEXT_PRIMARY),
-                ]
-                .spacing(2)
-                .padding(8),
-            )
-            .width(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(if is_selected {
-                    Color::from_rgba(1.0, 1.0, 1.0, 0.07).into()
-                } else {
-                    Color::from_rgba(1.0, 1.0, 1.0, 0.02).into()
-                }),
-                border: Border {
-                    radius: 8.0.into(),
-                    width: 1.0,
-                    color: if is_selected {
-                        Color::from_rgba(1.0, 1.0, 1.0, 0.18)
-                    } else {
-                        Color::from_rgba(1.0, 1.0, 1.0, 0.04)
-                    },
-                },
-                ..Default::default()
+                button::text
             }),
-        )
-        .on_press(Message::SelectTask(idx));
-
-        task_items = task_items.push(task_card);
+        button(if controller.panel.enlarged {
+            "↙"
+        } else {
+            "↗"
+        })
+        .on_press(Message::ToggleSize)
+        .style(button::text),
+        button("⌃")
+            .on_press(Message::ToggleExpand)
+            .style(button::text),
+    ]
+    .align_y(alignment::Vertical::Center)
+    .height(36)
+    .spacing(6);
+    let mut monitors = row![].spacing(4);
+    if controller.screens.len() > 1 {
+        let current = controller.placement.resolve(&controller.screens);
+        for (index, screen) in controller.screens.iter().enumerate() {
+            let selected = current.is_some_and(|current| current.id == screen.id);
+            let button = button(text((index + 1).to_string()).size(11))
+                .padding([3, 8])
+                .on_press(Message::SelectScreen(screen.id.clone()))
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::text
+                });
+            monitors = monitors.push(
+                tooltip(
+                    button,
+                    text(screen.name.clone()).size(12),
+                    tooltip::Position::Top,
+                )
+                .style(container::rounded_box),
+            );
+        }
     }
+    let footer = row![
+        monitors,
+        Space::new().width(Length::Fill),
+        text(if runtime.connecting {
+            "Connecting…"
+        } else if runtime.assistant.connected {
+            "OpenCode · connected"
+        } else {
+            "OpenCode · offline"
+        })
+        .size(10)
+        .color(COLOR_TEXT_MUTED)
+    ]
+    .align_y(alignment::Vertical::Center)
+    .height(24);
+    container(
+        column![
+            header,
+            assistant_view::view(runtime).map(|msg| match msg {
+                assistant_runtime::Message::OpenSettings => Message::OpenSettings,
+                assistant_runtime::Message::CloseSettings => Message::CloseSettings,
+                other => Message::Assistant(other),
+            }),
+            footer
+        ]
+        .spacing(4),
+    )
+    .padding([6, 12])
+    .width(width)
+    .height(height)
+    .style(surface)
+    .into()
+}
 
-    let scroll_tasks = scrollable(task_items).height(Length::Fill);
-
-    let selected_screen = controller.placement.resolve(&controller.screens).cloned();
-    let screen_picker: Element<'static, Message> = if controller.screens.len() > 1 {
+pub fn view_settings_window<'a>(runtime: &'a Runtime) -> Element<'a, Message> {
+    let available =
+        runtime.assistant.can_change_context() && !runtime.connecting && !runtime.dialog_open;
+    let folder_display = if runtime.settings.folder.as_os_str().is_empty() {
+        "(No folder selected)".into()
+    } else {
+        runtime.settings.folder.to_string_lossy().into_owned()
+    };
+    let content = column![
         row![
-            text("Screen").size(11).color(COLOR_TEXT_MUTED),
-            pick_list(controller.screens.clone(), selected_screen, |screen| {
-                Message::SelectScreen(screen.id)
-            })
-            .text_size(11),
+            text("minibro · Engine & Workspace Settings").size(14),
+            Space::new().width(Length::Fill),
+            button("✕")
+                .style(button::text)
+                .on_press(Message::CloseSettings),
+        ]
+        .align_y(alignment::Vertical::Center),
+        Space::new().height(4),
+        text("Working folder").size(12),
+        text(folder_display).size(12).color(COLOR_TEXT_MUTED),
+        button("Choose folder…").on_press_maybe(
+            available.then_some(Message::Assistant(assistant_runtime::Message::ChooseFolder)),
+        ),
+        Space::new().height(4),
+        text("OpenCode executable").size(12),
+        text(runtime.settings.executable.clone()).size(12).color(COLOR_TEXT_MUTED),
+        button("Choose executable…").on_press_maybe(
+            available.then_some(Message::Assistant(assistant_runtime::Message::ChooseExecutable)),
+        ),
+        Space::new().height(4),
+        text("Uses your OpenCode model, credentials and permission rules. Configure providers in OpenCode first.")
+            .size(11)
+            .color(COLOR_TEXT_MUTED),
+        Space::new().height(8),
+        row![
+            button("Connect / check status").on_press_maybe(
+                (!runtime.connecting && !runtime.dialog_open)
+                    .then_some(Message::Assistant(assistant_runtime::Message::Connect)),
+            ),
+            button("New conversation").on_press_maybe(
+                (available || !runtime.assistant.connected && !runtime.connecting)
+                    .then_some(Message::Assistant(assistant_runtime::Message::NewConversation)),
+            ),
+            Space::new().width(Length::Fill),
+            button("Close")
+                .style(button::secondary)
+                .on_press(Message::CloseSettings),
         ]
         .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        Space::new().into()
-    };
-
-    let content = column![
-        header_clickable,
-        Space::new().height(Length::Fixed(4.0)),
-        mood_buttons,
-        screen_picker,
-        Space::new().height(Length::Fixed(8.0)),
-        scroll_tasks,
+        .align_y(alignment::Vertical::Center),
     ]
-    .spacing(4)
-    .padding(12);
+    .spacing(8)
+    .padding(16);
 
-    container(content)
-        .width(Length::Fixed(NOTCH_EXPANDED_WIDTH))
-        .height(Length::Fixed(NOTCH_EXPANDED_HEIGHT))
-        .style(|_theme| container::Style {
-            background: Some(COLOR_NOTCH_BG.into()),
-            border: Border {
-                color: COLOR_NOTCH_BORDER,
-                width: 1.0,
-                radius: Radius {
-                    top_left: 0.0,
-                    top_right: 0.0,
-                    bottom_right: NOTCH_CORNER_RADIUS,
-                    bottom_left: NOTCH_CORNER_RADIUS,
-                },
-            },
-            shadow: Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
-                offset: iced::Vector::new(0.0, 6.0),
-                blur_radius: 16.0,
-            },
-            ..Default::default()
-        })
+    container(scrollable(content))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(surface)
         .into()
+}
+
+fn surface(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(COLOR_NOTCH_BG.into()),
+        border: Border {
+            color: COLOR_NOTCH_BORDER,
+            width: 1.0,
+            radius: 14.0.into(),
+        },
+        text_color: Some(Color::WHITE),
+        ..Default::default()
+    }
 }
