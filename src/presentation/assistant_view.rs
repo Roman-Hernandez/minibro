@@ -159,19 +159,21 @@ pub fn view(runtime: &Runtime) -> Element<'_, Message> {
                 let sender = text(if is_user { "You" } else { "minibro" })
                     .size(11)
                     .color(COLOR_TEXT_MUTED);
-                let md: Element<'_, Message> =
-                    if let Some(items) = runtime.markdown_cache.get(&message.id) {
-                        iced::widget::markdown::view(
-                            items.as_slice(),
-                            iced::widget::markdown::Settings::with_text_size(
-                                13,
-                                iced::widget::markdown::Style::from(&iced::Theme::Dark),
-                            ),
-                        )
-                        .map(|_| Message::Noop)
-                    } else {
-                        text(&message.text).size(13).into()
-                    };
+                let md: Element<'_, Message> = if let Some((_, items)) =
+                    runtime.markdown_cache.get(&message.id)
+                    && !items.is_empty()
+                {
+                    iced::widget::markdown::view(
+                        items.as_slice(),
+                        iced::widget::markdown::Settings::with_text_size(
+                            13,
+                            iced::widget::markdown::Style::from(&iced::Theme::Dark),
+                        ),
+                    )
+                    .map(|_| Message::Noop)
+                } else {
+                    text(&message.text).size(13).into()
+                };
                 content = content.push(column![sender, md].spacing(4));
             }
         }
@@ -214,46 +216,43 @@ pub fn view(runtime: &Runtime) -> Element<'_, Message> {
             .on_scroll(|viewport| Message::Scrolled(viewport.relative_offset().y >= 0.95))
             .height(Length::Fill),
     );
-    if runtime.view == View::Conversation {
-        let editor = text_editor(&runtime.editor)
-            .placeholder("Ask minibro to do something…")
-            .on_action(Message::Edit)
-            .height(64)
-            .size(13)
-            .key_binding(|press| {
-                if matches!(press.key, keyboard::Key::Named(keyboard::key::Named::Enter))
-                    && !press.modifiers.shift()
-                    && matches!(press.status, text_editor::Status::Focused { .. })
-                {
-                    Some(text_editor::Binding::Custom(Message::Send))
-                } else {
-                    text_editor::Binding::from_key_press(press)
-                }
-            });
-        let send = if runtime.assistant.busy() {
-            button(if runtime.assistant.stopping {
-                "Stopping…"
+    let editor = text_editor(&runtime.editor)
+        .placeholder("Ask minibro to do something…")
+        .on_action(Message::Edit)
+        .height(64)
+        .size(13)
+        .key_binding(|press| {
+            if matches!(press.key, keyboard::Key::Named(keyboard::key::Named::Enter))
+                && !press.modifiers.shift()
+                && matches!(press.status, text_editor::Status::Focused { .. })
+            {
+                Some(text_editor::Binding::Custom(Message::Send))
             } else {
-                "Stop"
-            })
-            .on_press_maybe(
-                (runtime.assistant.connected && !runtime.assistant.stopping)
-                    .then_some(Message::Stop),
-            )
+                text_editor::Binding::from_key_press(press)
+            }
+        });
+    let send = if runtime.assistant.busy() {
+        button(if runtime.assistant.stopping {
+            "Stopping…"
         } else {
-            button("Send ↑").on_press_maybe(runtime.assistant.can_send().then_some(Message::Send))
-        };
-        body = body.push(editor).push(
-            row![
-                text(runtime.assistant.snapshot.model.clone())
-                    .size(10)
-                    .color(COLOR_TEXT_MUTED),
-                Space::new().width(Length::Fill),
-                send.padding([4, 12])
-            ]
-            .align_y(alignment::Vertical::Center),
-        );
-    }
+            "Stop"
+        })
+        .on_press_maybe(
+            (runtime.assistant.connected && !runtime.assistant.stopping).then_some(Message::Stop),
+        )
+    } else {
+        button("Send ↑").on_press_maybe(runtime.assistant.can_send().then_some(Message::Send))
+    };
+    body = body.push(editor).push(
+        row![
+            text(runtime.assistant.snapshot.model.clone())
+                .size(10)
+                .color(COLOR_TEXT_MUTED),
+            Space::new().width(Length::Fill),
+            send.padding([4, 12])
+        ]
+        .align_y(alignment::Vertical::Center),
+    );
     body.into()
 }
 

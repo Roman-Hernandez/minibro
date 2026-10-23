@@ -31,6 +31,7 @@ pub enum View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::assistant::{ChatMessage, Snapshot};
 
     #[test]
     fn default_view_is_activity_and_switches_to_conversation() {
@@ -69,6 +70,36 @@ mod tests {
         runtime.assistant.snapshot.busy = true;
         let _task = runtime.update(Message::FolderChosen(Some("/temporary/other".into())));
         assert_eq!(runtime.settings.folder, PathBuf::from("/temporary/current"));
+    }
+
+    #[test]
+    fn streaming_message_updates_markdown_cache() {
+        let mut runtime = Runtime {
+            generation: 1,
+            ..Default::default()
+        };
+
+        let mut snap1 = Snapshot::default();
+        snap1.messages.push(ChatMessage {
+            id: "msg_1".into(),
+            role: "assistant".into(),
+            text: "".into(),
+        });
+        let _ = runtime.update(Message::Engine(1, Update::Event(Event::Snapshot(snap1))));
+
+        let mut snap2 = Snapshot::default();
+        snap2.messages.push(ChatMessage {
+            id: "msg_1".into(),
+            role: "assistant".into(),
+            text: "Hello **world**".into(),
+        });
+        let _ = runtime.update(Message::Engine(1, Update::Event(Event::Snapshot(snap2))));
+
+        let (_, cached) = runtime.markdown_cache.get("msg_1").expect("cached");
+        assert!(
+            !cached.is_empty(),
+            "cache was not updated when message text changed!"
+        );
     }
 }
 
@@ -117,7 +148,7 @@ pub struct Runtime {
     pub view: View,
     pub answers: BTreeMap<(String, usize), AnswerDraft>,
     pub expanded_activity: BTreeSet<String>,
-    pub markdown_cache: BTreeMap<String, Vec<iced::widget::markdown::Item>>,
+    pub markdown_cache: BTreeMap<String, (String, Vec<iced::widget::markdown::Item>)>,
     pub connecting: bool,
     pub dialog_open: bool,
     pub follow_conversation: bool,
@@ -314,6 +345,7 @@ impl Runtime {
                 self.assistant.draft = self.editor.text();
             }
             Message::Send => {
+                self.view = View::Conversation;
                 let command = self.assistant.send();
                 self.command(command);
             }
@@ -400,7 +432,15 @@ impl Runtime {
                     return self.persist();
                 }
             }
-            Message::View(view) => self.view = view,
+            Message::View(view) => {
+                self.view = view;
+                if view == View::Conversation {
+                    effect = iced::widget::operation::snap_to(
+                        iced::widget::Id::new("assistant-thread"),
+                        iced::widget::scrollable::RelativeOffset::END,
+                    );
+                }
+            }
             Message::OpenSettings
             | Message::CloseSettings
             | Message::ToggleSettings
@@ -514,11 +554,15 @@ impl Runtime {
                             .collect::<BTreeSet<_>>();
                         self.markdown_cache.retain(|id, _| active_ids.contains(id));
                         for message in &self.assistant.snapshot.messages {
-                            self.markdown_cache
-                                .entry(message.id.clone())
-                                .or_insert_with(|| {
-                                    iced::widget::markdown::parse(&message.text).collect()
-                                });
+                            let stale = self
+                                .markdown_cache
+                                .get(&message.id)
+                                .is_none_or(|(cached_text, _)| cached_text != &message.text);
+                            if stale {
+                                let items = iced::widget::markdown::parse(&message.text).collect();
+                                self.markdown_cache
+                                    .insert(message.id.clone(), (message.text.clone(), items));
+                            }
                         }
                     }
                     let new_input = self
